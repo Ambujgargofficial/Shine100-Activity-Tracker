@@ -23,35 +23,28 @@
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
         /* HIDE DEFAULT DATE TEXT WHEN EMPTY */
-        input[type="date"] {
+        input[type="date"]:invalid {
             position: relative;
-            color: transparent; /* Make text transparent initially */
+            color: transparent;
         }
         
-        /* Show text ONLY when a valid date is entered */
-        input[type="date"]:valid {
-            color: inherit;
-        }
-
-        /* Make the calendar picker icon always visible and centered when empty */
-        input[type="date"]::-webkit-calendar-picker-indicator {
+        /* Center the calendar icon when empty and ensure it is visible */
+        input[type="date"]:invalid::-webkit-calendar-picker-indicator {
             position: absolute;
-            top: 50%;
             left: 50%;
-            transform: translate(-50%, -50%);
-            width: auto;
-            height: auto;
+            transform: translateX(-50%);
+            width: 18px;
+            height: 18px;
             cursor: pointer;
             opacity: 0.6;
+            filter: invert(0.4); /* Ensures the icon stands out beautifully */
+            transition: all 0.2s;
         }
         
-        /* When valid (date selected), move the icon back to the right side */
-        input[type="date"]:valid::-webkit-calendar-picker-indicator {
-            position: relative;
-            transform: none;
-            left: auto;
-            top: auto;
-            opacity: 1;
+        input[type="date"]:invalid:hover::-webkit-calendar-picker-indicator {
+            opacity: 0.9;
+            filter: invert(0.2);
+            transform: translateX(-50%) scale(1.1);
         }
     </style>
 </head>
@@ -567,7 +560,10 @@
 
         // Generates the date input HTML
         function dateInput(rowId, activity, type, value, isActual) {
-            const bgClass = value ? (isActual ? 'bg-green-50 text-green-700 border-green-200 focus:ring-green-500' : 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500') : 'bg-transparent border-transparent hover:border-slate-300 focus:border-blue-500 focus:ring-blue-500 text-slate-700';
+            // When empty, show a dashed placeholder box so it is clearly visible
+            const bgClass = value 
+                ? (isActual ? 'bg-green-50 text-green-700 border-green-200 focus:ring-green-500' : 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500') 
+                : 'bg-slate-50 border-slate-300 border-dashed hover:border-solid hover:border-blue-400 focus:border-blue-500 focus:ring-blue-500 text-slate-700 shadow-sm';
             
             // Checkmark indicator for completed Actuals
             const completedIcon = (isActual && value) ? `<i class="ph ph-check-circle absolute right-1 top-1/2 -translate-y-1/2 text-green-500 pointer-events-none text-xs"></i>` : '';
@@ -578,7 +574,7 @@
                     <input type="date" 
                         value="${value}" 
                         onchange="updateField('${rowId}', '${activity}', '${type}', this.value)"
-                        class="w-[110px] text-xs px-1 py-1 rounded border transition-colors outline-none cursor-pointer ${bgClass}"
+                        class="w-[110px] text-xs px-1 py-1.5 rounded border transition-colors outline-none cursor-pointer ${bgClass}"
                         title="${isActual ? 'Actual Date' : 'Plan Date'}"
                         required>
                     ${completedIcon}

@@ -23,18 +23,19 @@
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
         /* FIXED DATE PICKER STYLING */
-        /* Removed the transparent text hack that was causing calendar icons to disappear */
         input[type="date"] {
-            color: #475569; /* slate-600 */
             font-family: inherit;
         }
-        
-        /* Make the placeholder text (dd/mm/yyyy) less harsh when empty */
-        input[type="date"]:invalid::-webkit-datetime-edit {
-            color: #cbd5e1; /* slate-300 */
+
+        /* Specifically target empty dates to hide the dd/mm/yyyy text completely */
+        .empty-date {
+            color: transparent !important;
+        }
+        .empty-date::-webkit-datetime-edit {
+            color: transparent !important;
         }
         
-        /* Ensure calendar icon is always visible and clickable */
+        /* Keep the calendar icon fully visible even when text is transparent */
         input[type="date"]::-webkit-calendar-picker-indicator {
             cursor: pointer;
             opacity: 0.6;
@@ -65,9 +66,6 @@
                     <span id="syncStatus" class="flex items-center gap-1 text-sm font-medium text-slate-500 mr-2 transition-all">
                         <!-- Sync status injected by JS -->
                     </span>
-                    <button onclick="manualPullData()" class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors shadow-sm">
-                        <i class="ph ph-arrows-clockwise"></i> Sync Sheet
-                    </button>
                     <button onclick="exportToCSV()" class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
                         <i class="ph ph-download-simple"></i> Export CSV
                     </button>
@@ -264,16 +262,9 @@
 
         // Initialize App
         async function init() {
-            updateSyncStatus('loading', 'Loading data...');
+            updateSyncStatus('loading', 'Loading live data...');
             await autoPullFromSheet();
             isInitialLoad = false; // Mark load as complete so user actions can trigger saves
-        }
-
-        // Manual pull button function
-        async function manualPullData() {
-            updateSyncStatus('loading', 'Syncing...');
-            await autoPullFromSheet();
-            showToast('Successfully synced with Google Sheets');
         }
 
         // Auto Pull Data from Sheet on Load
@@ -298,20 +289,20 @@
                     });
                     
                     localStorage.setItem('shine100Data', JSON.stringify(appData));
-                    updateSyncStatus('success', 'Synced with Cloud');
+                    updateSyncStatus('success', 'Live Synced');
                     
                     // Update UI with new data
                     updateLocationFilters();
                     renderSummaryTable();
                     renderTrackerTable();
                 } else {
-                    console.warn("Google Sheet returned empty data. Falling back to local storage.");
+                    console.warn("Google Sheet returned empty data. Initializing defaults.");
                     loadLocalData();
                 }
             } catch (error) {
-                console.error("Pull failed, falling back to local:", error);
+                console.error("Live Pull failed:", error);
                 loadLocalData();
-                updateSyncStatus('error', 'Offline - Local Mode');
+                updateSyncStatus('error', 'Connection Error');
             }
         }
 
@@ -344,13 +335,15 @@
             if (savedData && savedData !== "[]") {
                 appData = JSON.parse(savedData);
                 updateSyncStatus('success', 'Loaded locally');
-                updateLocationFilters();
-                renderSummaryTable();
-                renderTrackerTable();
             } else {
                 generateInitialData();
                 updateSyncStatus('success', 'Initialized Defaults');
             }
+            
+            // CRITICAL FIX: ALWAYS render the tables after loading, even if defaults were generated
+            updateLocationFilters();
+            renderSummaryTable();
+            renderTrackerTable();
         }
 
         // Generate the village row structures for given locations
@@ -406,7 +399,7 @@
 
         // Debounced sync function - waits 2 seconds after you stop typing/clicking to save to Google Sheets
         function triggerAutoSync() {
-            updateSyncStatus('saving');
+            updateSyncStatus('saving', 'Live Syncing...');
             clearTimeout(syncTimeout);
             
             // Only push to cloud if we actually have data to protect against clearing the sheet
@@ -425,13 +418,15 @@
                     });
                     const result = await response.json();
                     if (result.status === 'success') {
-                        updateSyncStatus('success', 'Auto-saved to Cloud');
+                        updateSyncStatus('success', 'Live Synced');
                     } else {
-                        updateSyncStatus('error', 'Sync Error');
+                        updateSyncStatus('error', 'Live Sync Error');
                     }
                 } catch (error) {
                     console.error("Auto-sync failed:", error);
-                    updateSyncStatus('error', 'Offline - Saved locally');
+                    updateSyncStatus('error', 'Sync Failed - Retrying...');
+                    // Automatically retry after 5 seconds if live sync drops
+                    setTimeout(triggerAutoSync, 5000);
                 }
             }, 2000);
         }
@@ -589,15 +584,16 @@
 
         // Generates the date input HTML
         function dateInput(rowId, activity, type, value, isActual) {
-            // When empty, show a dashed placeholder box so it is clearly visible
-            const bgClass = value 
-                ? (isActual ? 'bg-green-50 text-green-700 border-green-200 focus:ring-green-500' : 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500') 
-                : 'bg-slate-50 border-slate-300 border-dashed hover:border-solid hover:border-blue-400 focus:border-blue-500 focus:ring-blue-500';
+            const isEmpty = !value;
+            
+            // Apply specific classes based on whether it is empty or filled
+            const bgClass = isEmpty 
+                ? 'empty-date bg-slate-50 border-slate-300 border-dashed hover:border-solid hover:border-blue-400 focus:border-blue-500 focus:ring-blue-500' 
+                : (isActual ? 'filled-date bg-green-50 text-green-700 border-green-200 focus:ring-green-500' : 'filled-date bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500');
             
             // Checkmark indicator for completed Actuals
-            const completedIcon = (isActual && value) ? `<i class="ph ph-check-circle absolute right-1 top-1/2 -translate-y-1/2 text-green-500 pointer-events-none text-xs bg-green-50 px-1 rounded-l"></i>` : '';
+            const completedIcon = (isActual && !isEmpty) ? `<i class="ph ph-check-circle absolute right-1 top-1/2 -translate-y-1/2 text-green-500 pointer-events-none text-xs bg-green-50 px-1 rounded-l"></i>` : '';
 
-            // Removed 'required' attribute as it was interacting poorly with the CSS
             return `
                 <div class="relative group flex justify-center">
                     <input type="date" 

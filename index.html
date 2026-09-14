@@ -22,29 +22,28 @@
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-        /* HIDE DEFAULT DATE TEXT WHEN EMPTY */
-        input[type="date"]:invalid {
-            position: relative;
-            color: transparent;
+        /* FIXED DATE PICKER STYLING */
+        /* Removed the transparent text hack that was causing calendar icons to disappear */
+        input[type="date"] {
+            color: #475569; /* slate-600 */
+            font-family: inherit;
         }
         
-        /* Center the calendar icon when empty and ensure it is visible */
-        input[type="date"]:invalid::-webkit-calendar-picker-indicator {
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 18px;
-            height: 18px;
+        /* Make the placeholder text (dd/mm/yyyy) less harsh when empty */
+        input[type="date"]:invalid::-webkit-datetime-edit {
+            color: #cbd5e1; /* slate-300 */
+        }
+        
+        /* Ensure calendar icon is always visible and clickable */
+        input[type="date"]::-webkit-calendar-picker-indicator {
             cursor: pointer;
             opacity: 0.6;
-            filter: invert(0.4); /* Ensures the icon stands out beautifully */
             transition: all 0.2s;
         }
         
-        input[type="date"]:invalid:hover::-webkit-calendar-picker-indicator {
-            opacity: 0.9;
-            filter: invert(0.2);
-            transform: translateX(-50%) scale(1.1);
+        input[type="date"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
+            transform: scale(1.1);
         }
     </style>
 </head>
@@ -66,6 +65,9 @@
                     <span id="syncStatus" class="flex items-center gap-1 text-sm font-medium text-slate-500 mr-2 transition-all">
                         <!-- Sync status injected by JS -->
                     </span>
+                    <button onclick="manualPullData()" class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors shadow-sm">
+                        <i class="ph ph-arrows-clockwise"></i> Sync Sheet
+                    </button>
                     <button onclick="exportToCSV()" class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
                         <i class="ph ph-download-simple"></i> Export CSV
                     </button>
@@ -258,14 +260,20 @@
         let appData = [];
         const GAS_URL = "https://script.google.com/macros/s/AKfycbzX0JyhWlkKjwHAFSiwwpZJ1iDCudzYP_V_2p5Z2SngGU7WEPUyz9ZhgVEx979JZDWO/exec";
         let syncTimeout;
+        let isInitialLoad = true; // FLAG TO PREVENT ACCIDENTAL OVERWRITES
 
         // Initialize App
         async function init() {
             updateSyncStatus('loading', 'Loading data...');
             await autoPullFromSheet();
-            updateLocationFilters();
-            renderSummaryTable();
-            renderTrackerTable();
+            isInitialLoad = false; // Mark load as complete so user actions can trigger saves
+        }
+
+        // Manual pull button function
+        async function manualPullData() {
+            updateSyncStatus('loading', 'Syncing...');
+            await autoPullFromSheet();
+            showToast('Successfully synced with Google Sheets');
         }
 
         // Auto Pull Data from Sheet on Load
@@ -275,6 +283,7 @@
                 const data = await response.json();
                 
                 if (Array.isArray(data) && data.length > 0) {
+                    console.log("Successfully pulled data from Google Sheets:", data);
                     // Pre-process dates from Google Sheets to ensure they fit the HTML input format (YYYY-MM-DD)
                     appData = data.map(row => {
                         return {
@@ -290,7 +299,13 @@
                     
                     localStorage.setItem('shine100Data', JSON.stringify(appData));
                     updateSyncStatus('success', 'Synced with Cloud');
+                    
+                    // Update UI with new data
+                    updateLocationFilters();
+                    renderSummaryTable();
+                    renderTrackerTable();
                 } else {
+                    console.warn("Google Sheet returned empty data. Falling back to local storage.");
                     loadLocalData();
                 }
             } catch (error) {
@@ -326,9 +341,12 @@
         function loadLocalData() {
             const savedData = localStorage.getItem('shine100Data');
             
-            if (savedData) {
+            if (savedData && savedData !== "[]") {
                 appData = JSON.parse(savedData);
                 updateSyncStatus('success', 'Loaded locally');
+                updateLocationFilters();
+                renderSummaryTable();
+                renderTrackerTable();
             } else {
                 generateInitialData();
                 updateSyncStatus('success', 'Initialized Defaults');
@@ -363,6 +381,8 @@
         }
 
         function saveData() {
+            if (isInitialLoad) return; // NEVER save during the initial load phase
+            
             localStorage.setItem('shine100Data', JSON.stringify(appData));
             updateLocationFilters();
             triggerAutoSync();
@@ -388,6 +408,13 @@
         function triggerAutoSync() {
             updateSyncStatus('saving');
             clearTimeout(syncTimeout);
+            
+            // Only push to cloud if we actually have data to protect against clearing the sheet
+            if (!appData || appData.length === 0) {
+                console.error("Attempted to sync empty data array! Aborting to protect Google Sheet.");
+                updateSyncStatus('error', 'Sync Aborted - Empty Data');
+                return;
+            }
             
             syncTimeout = setTimeout(async () => {
                 try {
@@ -547,6 +574,8 @@
         function updateLocationFilters() {
             const locSet = new Set(appData.map(d => d.location));
             const select = document.getElementById('trackerLocationFilter');
+            if(!select) return; // Guard clause
+            
             // Keep the 'All' option, remove the rest
             while (select.options.length > 1) { select.remove(1); }
             
@@ -563,20 +592,19 @@
             // When empty, show a dashed placeholder box so it is clearly visible
             const bgClass = value 
                 ? (isActual ? 'bg-green-50 text-green-700 border-green-200 focus:ring-green-500' : 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500') 
-                : 'bg-slate-50 border-slate-300 border-dashed hover:border-solid hover:border-blue-400 focus:border-blue-500 focus:ring-blue-500 text-slate-700 shadow-sm';
+                : 'bg-slate-50 border-slate-300 border-dashed hover:border-solid hover:border-blue-400 focus:border-blue-500 focus:ring-blue-500';
             
             // Checkmark indicator for completed Actuals
-            const completedIcon = (isActual && value) ? `<i class="ph ph-check-circle absolute right-1 top-1/2 -translate-y-1/2 text-green-500 pointer-events-none text-xs"></i>` : '';
+            const completedIcon = (isActual && value) ? `<i class="ph ph-check-circle absolute right-1 top-1/2 -translate-y-1/2 text-green-500 pointer-events-none text-xs bg-green-50 px-1 rounded-l"></i>` : '';
 
-            // We must add 'required' attribute so the CSS :valid selector works properly to hide/show text
+            // Removed 'required' attribute as it was interacting poorly with the CSS
             return `
                 <div class="relative group flex justify-center">
                     <input type="date" 
                         value="${value}" 
                         onchange="updateField('${rowId}', '${activity}', '${type}', this.value)"
-                        class="w-[110px] text-xs px-1 py-1.5 rounded border transition-colors outline-none cursor-pointer ${bgClass}"
-                        title="${isActual ? 'Actual Date' : 'Plan Date'}"
-                        required>
+                        class="w-[120px] text-xs px-2 py-1.5 rounded border transition-colors outline-none ${bgClass}"
+                        title="${isActual ? 'Actual Date' : 'Plan Date'}">
                     ${completedIcon}
                 </div>
             `;

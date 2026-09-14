@@ -21,6 +21,38 @@
         /* Smooth transitions */
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* HIDE DEFAULT DATE TEXT WHEN EMPTY */
+        input[type="date"] {
+            position: relative;
+            color: transparent; /* Make text transparent initially */
+        }
+        
+        /* Show text ONLY when a valid date is entered */
+        input[type="date"]:valid {
+            color: inherit;
+        }
+
+        /* Make the calendar picker icon always visible and centered when empty */
+        input[type="date"]::-webkit-calendar-picker-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: auto;
+            height: auto;
+            cursor: pointer;
+            opacity: 0.6;
+        }
+        
+        /* When valid (date selected), move the icon back to the right side */
+        input[type="date"]:valid::-webkit-calendar-picker-indicator {
+            position: relative;
+            transform: none;
+            left: auto;
+            top: auto;
+            opacity: 1;
+        }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
@@ -250,7 +282,19 @@
                 const data = await response.json();
                 
                 if (Array.isArray(data) && data.length > 0) {
-                    appData = data;
+                    // Pre-process dates from Google Sheets to ensure they fit the HTML input format (YYYY-MM-DD)
+                    appData = data.map(row => {
+                        return {
+                            ...row,
+                            activities: {
+                                leaflet: { plan: formatDateForInput(row.activities.leaflet.plan), actual: formatDateForInput(row.activities.leaflet.actual) },
+                                pwoBoard: { plan: formatDateForInput(row.activities.pwoBoard.plan), actual: formatDateForInput(row.activities.pwoBoard.actual) },
+                                loanExchange: { plan: formatDateForInput(row.activities.loanExchange.plan), actual: formatDateForInput(row.activities.loanExchange.actual) },
+                                eRikshaw: { plan: formatDateForInput(row.activities.eRikshaw.plan), actual: formatDateForInput(row.activities.eRikshaw.actual) }
+                            }
+                        }
+                    });
+                    
                     localStorage.setItem('shine100Data', JSON.stringify(appData));
                     updateSyncStatus('success', 'Synced with Cloud');
                 } else {
@@ -260,6 +304,28 @@
                 console.error("Pull failed, falling back to local:", error);
                 loadLocalData();
                 updateSyncStatus('error', 'Offline - Local Mode');
+            }
+        }
+
+        // Helper function to force dates into YYYY-MM-DD format for HTML inputs
+        function formatDateForInput(dateString) {
+            if (!dateString) return "";
+            try {
+                // If already in YYYY-MM-DD format, return as is
+                if (/^\d{4}-\d{2}-\d{2}$/.test(dateString.trim())) {
+                    return dateString.trim();
+                }
+                
+                // If it's a full ISO timestamp from Sheets (e.g. 2026-09-12T18:30:00.000Z)
+                const d = new Date(dateString);
+                if (isNaN(d.getTime())) return dateString; // Fallback if invalid
+                
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            } catch (e) {
+                return dateString; // Return original if parsing fails
             }
         }
 
@@ -506,13 +572,15 @@
             // Checkmark indicator for completed Actuals
             const completedIcon = (isActual && value) ? `<i class="ph ph-check-circle absolute right-1 top-1/2 -translate-y-1/2 text-green-500 pointer-events-none text-xs"></i>` : '';
 
+            // We must add 'required' attribute so the CSS :valid selector works properly to hide/show text
             return `
-                <div class="relative group">
+                <div class="relative group flex justify-center">
                     <input type="date" 
                         value="${value}" 
                         onchange="updateField('${rowId}', '${activity}', '${type}', this.value)"
                         class="w-[110px] text-xs px-1 py-1 rounded border transition-colors outline-none cursor-pointer ${bgClass}"
-                        title="${isActual ? 'Actual Date' : 'Plan Date'}">
+                        title="${isActual ? 'Actual Date' : 'Plan Date'}"
+                        required>
                     ${completedIcon}
                 </div>
             `;

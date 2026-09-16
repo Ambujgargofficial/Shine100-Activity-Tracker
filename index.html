@@ -151,7 +151,8 @@
                 </div>
                 <div class="w-48">
                     <label class="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Filter by Type</label>
-                    <select id="trackerTypeFilter" onchange="renderTrackerTable()" class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                    <!-- UPDATED: Changed onchange to trigger the cascading filter logic -->
+                    <select id="trackerTypeFilter" onchange="handleTypeFilterChange()" class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
                         <option value="All">All Types</option>
                         <option value="AD">AD</option>
                         <option value="Branch">Branch</option>
@@ -347,7 +348,6 @@
                 updateSyncStatus('success', 'Initialized Defaults');
             }
             
-            // CRITICAL FIX: ALWAYS render the tables after loading, even if defaults were generated
             updateLocationFilters();
             renderSummaryTable();
             renderTrackerTable();
@@ -373,7 +373,11 @@
                     });
                 }
             });
-            saveData();
+            
+            // We call localStorage directly here to save initial structure
+            // We DO NOT call the main saveData() to avoid triggering an auto-sync 
+            // of empty defaults when the app first loads, just in case.
+            localStorage.setItem('shine100Data', JSON.stringify(appData));
         }
 
         function generateId() {
@@ -384,7 +388,12 @@
             if (isInitialLoad) return; // NEVER save during the initial load phase
             
             localStorage.setItem('shine100Data', JSON.stringify(appData));
-            updateLocationFilters();
+            
+            // REMOVED updateLocationFilters() from here.
+            // Editing a date or a village name does not create new locations, 
+            // so we shouldn't rebuild the location dropdown on every edit.
+            // Rebuilding it was causing the selected filter to reset.
+
             triggerAutoSync();
         }
 
@@ -579,20 +588,54 @@
             }
         }
 
-        function updateLocationFilters() {
-            const locSet = new Set(appData.map(d => d.location));
+        function updateLocationFilters(selectedType = 'All') {
             const select = document.getElementById('trackerLocationFilter');
             if(!select) return; // Guard clause
             
-            // Keep the 'All' option, remove the rest
+            // Save the currently selected location so we can try to re-select it
+            const currentSelection = select.value;
+            
+            // Keep the 'All Locations' option, remove the rest
             while (select.options.length > 1) { select.remove(1); }
             
-            Array.from(locSet).sort().forEach(loc => {
+            // Get unique locations, optionally filtered by type
+            const locations = new Set();
+            appData.forEach(d => {
+                if (selectedType === 'All' || d.type === selectedType) {
+                    locations.add(d.location);
+                }
+            });
+            
+            let selectionStillValid = false;
+            
+            // Sort and append options
+            Array.from(locations).sort().forEach(loc => {
                 const opt = document.createElement('option');
                 opt.value = loc;
                 opt.textContent = loc;
                 select.appendChild(opt);
+                
+                if (loc === currentSelection) {
+                    selectionStillValid = true;
+                }
             });
+            
+            // If the previously selected location is still valid for the new type, keep it.
+            // Otherwise, reset to 'All'
+            if (selectionStillValid) {
+                select.value = currentSelection;
+            } else {
+                select.value = 'All';
+            }
+        }
+        
+        // This function handles the cascade effect from the Type dropdown to Location dropdown
+        function handleTypeFilterChange() {
+            const selectedType = document.getElementById('trackerTypeFilter').value;
+            // Rebuild the location dropdown options based on the newly selected type
+            updateLocationFilters(selectedType);
+            // Re-render the table with the new filter constraints
+            renderTrackerTable();
         }
 
         // Generates the date input HTML
@@ -600,7 +643,6 @@
             const isEmpty = !value;
             
             // Apply specific classes based on whether it is empty or filled
-            // REMOVED dashed borders and background for a cleaner, invisible look on empty boxes
             const bgClass = isEmpty 
                 ? 'empty-date bg-transparent border-transparent hover:bg-slate-50 hover:border-slate-300 focus:bg-white focus:border-blue-500 focus:ring-blue-500' 
                 : (isActual ? 'filled-date bg-green-50 text-green-700 border-green-200 focus:ring-green-500' : 'filled-date bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500');
@@ -705,9 +747,11 @@
             const row = appData.find(r => r.id === rowId);
             if (row) {
                 row.activities[activity][type] = value;
-                saveData();
+                saveData(); // This handles saving to localStorage and triggering cloud sync
                 showToast(`Updated ${activity} ${type} date`);
-                // Re-render minimally if possible, or full to update colors
+                
+                // Re-render the tracker table so the date input gets its proper classes (colors) 
+                // based on whether it is empty or filled now.
                 renderTrackerTable(); 
             }
         }
@@ -748,11 +792,21 @@
             }
 
             saveData();
+            
+            // Because we added a NEW location, we DO need to update the location filters here
+            // Ensure we keep the currently selected Type filter in mind
+            const currentTypeFilter = document.getElementById('trackerTypeFilter').value;
+            updateLocationFilters(currentTypeFilter);
+            
             document.getElementById('newLocName').value = '';
             document.getElementById('addLocationModal').classList.add('hidden');
             
             // Switch to tracker and set filter to new location
-            document.getElementById('trackerLocationFilter').value = name;
+            // If the new location matches the current Type filter, select it
+            if (currentTypeFilter === 'All' || currentTypeFilter === type) {
+                document.getElementById('trackerLocationFilter').value = name;
+            }
+            
             switchTab('tracker');
             showToast(`Added ${name} with ${numVillages} villages`);
         }
